@@ -18,6 +18,10 @@ class DataSet:
         # standardise data based on a min and max value
         dataset = ( (dataset-dataset.min())/(dataset.max()-dataset.min()) ) * (limit["max"] - limit["min"]) + limit["min"]
 
+        # randomly shuffle rows
+        dataset = dataset.sample(frac=1)
+
+
         self.data = dataset
 
     def getDataset(self, columns = []):
