@@ -1,3 +1,5 @@
+from typing import final
+from matplotlib import markers
 import numpy as np
 import pandas as pd
 from ModelClass import Model
@@ -22,7 +24,7 @@ class DataSet:
 		dataset["Skelton"] = dataset["Skelton"].shift(periods=lagby)
 
 		# filter values greater than 3 stds from the mean and negative values
-		dataset = dataset[ (dataset < dataset.mean() + ( 3*dataset.std() )) & (dataset >= 0) ].dropna() #TODO INTERPOLATION INSTEAD
+		dataset = dataset[ (dataset < dataset.mean() + ( 3*dataset.std() )) & (dataset >= 0) ].interpolate().dropna() 
 
 		self.outputMax = dataset["Skelton"].max()
 		self.outputMin = dataset["Skelton"].min()
@@ -110,8 +112,8 @@ pr.enable()
 trainingInfo, validationInfo, epocs = m.train(
     trainingParams={
         "epocs": 1000,
-        "batch_size": 1,
-        "learning_rate": [0.1,0.01],
+        "batch_size": 2,
+        "learning_rate": [0.1,0.05],
         "validation_error_check_freq": 100,
         "validation_error_increase_limit": 1.05
     },
@@ -137,14 +139,30 @@ print( ate)
 print("TOTAL TIME TAKEN:", time.time() - startTime, "SECS, FOR", epocs, "EPOCS")
 
 
-plt.suptitle("Error for training and validation sets")
-plt.rcParams["figure.autolayout"] = True
+# plot expected vs actual
 
-plt.xlabel("Epocs") 
-plt.ylabel("Error")
+trainingData, validationData, testingData = d.getDataset(["Date", "Crakehill", "Skip Bridge", "Westwick", "Snaizeholme", "Arkengarthdale", "East Cowton", "Malham Tarn", "Skelton"])
+finalPlot = np.vstack([trainingData, validationData, testingData])
+finalActual = np.empty((len(finalPlot),))
+for i, row in enumerate (finalPlot):
+	correctOutput = row[-1]
+	inputs = row[:-1]
+	actualOutput = m.forwardProp(inputs)[-1][1]
+	finalActual[i] = actualOutput
 
-plt.plot(trainingInfo[trainingInfo != 0], label="Training")
-plt.plot(validationInfo[validationInfo != 0], label="Validation")
-plt.legend(loc='best')
+# print(finalActual)
+# print(finalPlot[:,-1])
+
+fig, (ax1, ax2) = plt.subplots(2)
+fig.suptitle("Error for training and validation sets")
+
+ax1.scatter(finalActual, finalPlot[:,-1])
+ax2.plot(trainingInfo[trainingInfo != 0], label="Training")
+ax2.plot(validationInfo[validationInfo != 0], label="Validation")
+
+ax2.set(xlabel='epocs', ylabel='error')
+
+
+ax2.legend(loc='best')
 
 plt.show()
