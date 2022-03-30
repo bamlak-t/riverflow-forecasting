@@ -1,31 +1,36 @@
-from typing import final
-from matplotlib import markers
 import numpy as np
 import pandas as pd
 from ModelClass import Model
 import matplotlib.pyplot as plt
 import time
-
-
 import cProfile, pstats, io
 from pstats import SortKey
 
 class DataSet:
-	def __init__(self, filename: str, limit: dict, lagby: int) -> None:
+	def __init__(self, filename: str, limit: dict, lagby: dict, moveAvg: int, dateType: str, stdOut: int) -> None:
+
 		# parse excel with 'none' values for 'a' and '#'
 		dataset = pd.read_excel(filename+".xlsx", na_values=["a", "#"], dtype=float, parse_dates=['Date']) 
 
-		# dataset = dataset.head(11)
+		# convert date into day number (1-365/366), month number (1-12) or week number (1-53)
+		dataset["Date"] = [float(x.strftime('%'+dateType)) for x in dataset["Date"]]
 
-		# convert date into day number (1-365/366) of the year
-		dataset["Date"] = [float(x.strftime('%j')) for x in dataset["Date"]]
+		# use previous Skelton river-flow as a predictor for the present
+		dataset["Lagged Skelton"] = dataset["Skelton"]
 
-		# lag dataset
-		dataset["Skelton"] = dataset["Skelton"].shift(periods=lagby)
+		# add moving average columns
+		headers = ["Crakehill", "Skip Bridge", "Westwick", "Snaizeholmethe", "Arkengarthdale", "East Cowton", "Malham Tarn", "Skelton"]
+		for header in headers:
+			dataset[header+" Avg"] = dataset[header].rolling(window=moveAvg).mean()
+
+		# lag dataset by specified number
+		for key, value in lagby.items():
+			dataset[key] = dataset[key].shift(periods=value)
 
 		# filter values greater than 3 stds from the mean and negative values
-		dataset = dataset[ (dataset < dataset.mean() + ( 3*dataset.std() )) & (dataset >= 0) ].interpolate().dropna() 
+		dataset = dataset[ (dataset < dataset.mean() + ( stdOut*dataset.std() )) & (dataset >= 0) ].interpolate().dropna() 
 
+		# used for inverse standardisation function
 		self.outputMax = dataset["Skelton"].max()
 		self.outputMin = dataset["Skelton"].min()
 		self.limit = limit
@@ -36,30 +41,31 @@ class DataSet:
 		# randomise dataset to mitigate data missrepresentation
 		dataset = dataset.sample(frac=1)
 
-		print(dataset, len(dataset))
-
 		self.data = dataset
 
+	# used to return a section of the dataset with specified columns
 	def getDataset(self, columns: list = [], split: list = [0.6, 0.2, 0.2]) -> list:
-
+		# training and validation percentages
 		trainLen = split[0]
 		validateLen = split[1]
 
+		# used to specify certain columns from dataset
 		returnSet = self.data.copy()
-
 		returnSet = returnSet if columns == [] else returnSet[columns]
 
+		# split data into training, validation and testing according to the split specified
 		trainingData, validationData, testingData = np.split( 
 														returnSet.sample(frac=1, random_state=1).to_numpy(), 
 														[int(trainLen*len(returnSet)), int((trainLen+validateLen)*len(returnSet))]
 													)
-
 		return trainingData, validationData, testingData
 
-	def standardise(self, value: float) -> float:
+	# used to standardise a value
+	def standardise(self: object, value: float) -> float:
 		return ( (value-self.outputMin)/(self.outputMax-self.outputMin) ) * (self.limit["max"] - self.limit["min"]) + self.limit["min"]
 
-	def inverseStandardise(self, standard: float) -> float:
+	# used to inverse standardise a value
+	def inverseStandardise(self: object, standard: float) -> float:
 		return ((( standard - self.limit["min"] ) / (self.limit["max"] - self.limit["min"])) * (self.outputMax - self.outputMin) ) + self.outputMin		
 
 def outSet(set, num):
@@ -68,13 +74,20 @@ def outSet(set, num):
 		if (i+1 == num):
 			break
 
+cols = ["Lagged Skelton", "Crakehill", "Skip Bridge", "Westwick", "Snaizeholmethe", "Arkengarthdale", "East Cowton", "Malham Tarn", "Skelton"]
+colsAvg = [c+" Avg" for c in cols[1:]]
+
 d = DataSet(
         filename = "Dataset", 
         limit = {"min": 0, "max": 1},
-        lagby=1
+        lagby= {"Crakehill":1, "Skip Bridge":1, "Westwick":1, "Snaizeholmethe":1, "Arkengarthdale":1, "East Cowton":1, "Lagged Skelton":1, "Malham Tarn":1}, #'dict(zip(cols[:-1], [-1,-1,-1,-1,-1,-1,-1,-2])),
+		moveAvg = 5,
+		dateType = "j",
+		stdOut = 3
     )
 
-trainingData, validationData, testingData = d.getDataset(["Date", "Crakehill", "Skip Bridge", "Westwick", "Snaizeholme", "Arkengarthdale", "East Cowton", "Malham Tarn", "Skelton"])
+print(colsAvg+cols)
+trainingData, validationData, testingData = d.getDataset(colsAvg+cols)
 
 print("\nTRAINING DATA", len(trainingData))
 outSet(trainingData, 6)
@@ -85,8 +98,8 @@ outSet(testingData, 5)
 
 m = Model(
         network = {
-                "inputs": 8,
-                "hiddenLayers": [8],
+                "inputs": 16,
+                "hiddenLayers": [10],
                 "outputs": 1
         },
         activation = "sigmoid"
@@ -112,7 +125,7 @@ pr.enable()
 trainingInfo, validationInfo, epocs = m.train(
     trainingParams={
         "epocs": 1000,
-        "batch_size": 2,
+        "batch_size": 1,
         "learning_rate": [0.1,0.05],
         "validation_error_check_freq": 100,
         "validation_error_increase_limit": 1.05
@@ -141,7 +154,6 @@ print("TOTAL TIME TAKEN:", time.time() - startTime, "SECS, FOR", epocs, "EPOCS")
 
 # plot expected vs actual
 
-trainingData, validationData, testingData = d.getDataset(["Date", "Crakehill", "Skip Bridge", "Westwick", "Snaizeholme", "Arkengarthdale", "East Cowton", "Malham Tarn", "Skelton"])
 finalPlot = np.vstack([trainingData, validationData, testingData])
 finalActual = np.empty((len(finalPlot),))
 for i, row in enumerate (finalPlot):

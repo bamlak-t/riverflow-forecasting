@@ -51,7 +51,6 @@ class Model:
             layerOutSize = len(self.allLayerWeights[i-1])+1
 
             output = np.dot(self.allLayerWeights[i-1], layerInpOut[i-1]) 
-
             outputActive = np.empty((layerOutSize,), dtype=float) 
             outputActive[0] =1
             for j in range (1, layerOutSize):
