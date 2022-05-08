@@ -3,8 +3,6 @@ import pandas as pd
 from ModelClass import Model
 import matplotlib.pyplot as plt
 import time
-import cProfile, pstats, io
-from pstats import SortKey
 
 class DataSet:
 	def __init__(self, filename: str, limit: dict, lagby: dict, moveAvg: int, dateType: str, stdOut: int) -> None:
@@ -26,7 +24,7 @@ class DataSet:
 		# lag dataset by specified number
 		for key, value in lagby.items():
 			dataset[key] = dataset[key].shift(periods=value)
-
+		
 		# filter values greater than 3 stds from the mean and negative values
 		dataset = dataset[ (dataset < dataset.mean() + ( stdOut*dataset.std() )) & (dataset >= 0) ].interpolate().dropna() 
 
@@ -60,19 +58,17 @@ class DataSet:
 													)
 		return trainingData, validationData, testingData
 
+	# save dataset based for given name
+	def saveDataset(self, name: str) -> None:
+		self.data.to_excel(name+".xlsx")
+
 	# used to standardise a value
-	def standardise(self: object, value: float) -> float:
+	def standardise(self, value: float) -> float:
 		return ( (value-self.outputMin)/(self.outputMax-self.outputMin) ) * (self.limit["max"] - self.limit["min"]) + self.limit["min"]
 
 	# used to inverse standardise a value
-	def inverseStandardise(self: object, standard: float) -> float:
+	def inverseStandardise(self, standard: float) -> float:
 		return ((( standard - self.limit["min"] ) / (self.limit["max"] - self.limit["min"])) * (self.outputMax - self.outputMin) ) + self.outputMin		
-
-def outSet(set, num):
-	for i, val in enumerate(set):
-		print(val)
-		if (i+1 == num):
-			break
 
 cols = ["Lagged Skelton", "Crakehill", "Skip Bridge", "Westwick", "Snaizeholmethe", "Arkengarthdale", "East Cowton", "Malham Tarn", "Skelton"]
 colsAvg = [c+" Avg" for c in cols[1:]]
@@ -86,23 +82,18 @@ d = DataSet(
 		stdOut = 3
     )
 
-print(colsAvg+cols)
 trainingData, validationData, testingData = d.getDataset(colsAvg+cols)
 
-print("\nTRAINING DATA", len(trainingData))
-outSet(trainingData, 6)
-print("\nValidation DATA", len(validationData))
-outSet(validationData, 5)
-print("\nTESTING DATA", len(testingData))
-outSet(testingData, 5)
+print(trainingData)
 
 m = Model(
         network = {
                 "inputs": 16,
-                "hiddenLayers": [10],
+                "hiddenLayers": [20],
                 "outputs": 1
         },
-        activation = "sigmoid"
+        activation = "sigmoid",
+		augments = {"momentum": True, "weightDecay": True, "annealing": True}
     )
 
 print("BEFORE TRAINING")
@@ -118,28 +109,19 @@ print( bte)
 print("---------- AFTER TRAINING ----------")
 
 startTime = time.time()
-pr = cProfile.Profile()
-
-pr.enable()
 
 trainingInfo, validationInfo, epocs = m.train(
     trainingParams={
-        "epocs": 1000,
-        "batch_size": 1,
-        "learning_rate": [0.1,0.05],
-        "validation_error_check_freq": 100,
-        "validation_error_increase_limit": 1.05
+        "epocs": 500,
+        "batch_size": 2,
+        "learning_rate": [0.5,0.01],
+        "validation_error_check_freq": 50,
+        "validation_error_increase_limit": 1.03
     },
     trainingData= trainingData,
     validationData=validationData,
     inverseStandardise = d.inverseStandardise
 )
-pr.disable()
-s = io.StringIO()
-sortby = SortKey.CUMULATIVE
-ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
-ps.print_stats()
-print(s.getvalue())
 
 print("TRAINING ERROR")
 atr = m.test(dataset = trainingData, inverseStandardise = d.inverseStandardise)
@@ -151,9 +133,7 @@ print( ate)
 
 print("TOTAL TIME TAKEN:", time.time() - startTime, "SECS, FOR", epocs, "EPOCS")
 
-
-# plot expected vs actual
-
+# used to calculate final actual outputs
 finalPlot = np.vstack([trainingData, validationData, testingData])
 finalActual = np.empty((len(finalPlot),))
 for i, row in enumerate (finalPlot):
@@ -162,13 +142,14 @@ for i, row in enumerate (finalPlot):
 	actualOutput = m.forwardProp(inputs)[-1][1]
 	finalActual[i] = actualOutput
 
-# print(finalActual)
-# print(finalPlot[:,-1])
-
 fig, (ax1, ax2) = plt.subplots(2)
 fig.suptitle("Error for training and validation sets")
 
-ax1.scatter(finalActual, finalPlot[:,-1])
+# plot expected vs actual scatter plot
+ax1.plot(finalActual, label="Observed" )
+ax1.plot(finalPlot[:,-1], label="Wanted")
+
+# plot training and validation graphs
 ax2.plot(trainingInfo[trainingInfo != 0], label="Training")
 ax2.plot(validationInfo[validationInfo != 0], label="Validation")
 
