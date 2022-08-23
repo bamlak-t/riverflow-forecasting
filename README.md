@@ -1,3 +1,3 @@
 # Riverflow-Forcasting
 
-Neural network built from scratch to predict riverflow based on a number of predictors, such as rainfall and riverflow from upstream tributaries. 
+A neural network created from scratch to predict river flow based on several predictors, such as rainfall and river flow from upstream tributaries.
